@@ -8,6 +8,8 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import time, os
+import colored_traceback
+colored_traceback.add_hook()
 '''
 Valid labels:
     [ 0  1  2  4  5  6  7  8 10 11 |no 17]
@@ -17,7 +19,7 @@ num_style_dim = 32
 classes_labels = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11]
 num_classes = 11
 img_size = [96, 96]
-BATCH_SIZE = 15
+BATCH_SIZE = 3
 phase_train = tf.placeholder(tf.bool)
 
 global fig
@@ -54,7 +56,6 @@ def read_and_decode(filename_queue):
             'image_raw': tf.FixedLenFeature([], tf.string),
             'mask_raw': tf.FixedLenFeature([], tf.string),
         })
-    print(features)
     # must be read back as uint8 here
     image = tf.decode_raw(features['image_raw'], tf.float32)
     segmentation = tf.decode_raw(features['mask_raw'], tf.float32)
@@ -92,94 +93,96 @@ def input_pipeline(filenames, batch_size=15, num_epochs=None):
 
 def encoder(x):
     activation = tf.nn.relu
-    x = tf.reshape(x, img_size)
-    x = tf.layers.conv2d(
-        x,
-        filters=16,
-        kernel_size=[3, 3],
-        strides=(1, 1),
-        padding='valid',
-    )
-    x = tf.layers.average_pooling2d(x, pool_size=[2, 2], strides=[2, 2])
-    x = tf.layers.conv2d(
-        x,
-        filters=16,
-        kernel_size=[3, 3],
-        strides=(1, 1),
-        padding='valid',
-    )
-    print(x)
-    x = tf.layers.flatten(x)
-    x = tf.layers.dense(inputs=x, units=512, activation=activation)
-    # x=tf.layers.dropout(x,0.5)
-    x = tf.layers.dense(inputs=x, units=256, activation=activation)
-    # x=tf.layers.dropout(x,0.5)
-    x = tf.layers.dense(inputs=x, units=num_style_dim, activation=activation)
-    x = tf.nn.softmax(x, name='output')
-    return x, phase_train
+    with tf.variable_scope('Encoder', reuse=tf.AUTO_REUSE):
+        x = tf.reshape(x, [-1, img_size[0], img_size[1], 3])
+        x = tf.layers.conv2d(
+            x,
+            filters=16,
+            kernel_size=[3, 3],
+            strides=(1, 1),
+            padding='valid',
+        )
+        x = tf.layers.average_pooling2d(x, pool_size=[2, 2], strides=[2, 2])
+        x = tf.layers.conv2d(
+            x,
+            filters=16,
+            kernel_size=[3, 3],
+            strides=(1, 1),
+            padding='valid',
+        )
+        x = tf.layers.flatten(x)
+        x = tf.layers.dense(inputs=x, units=256, activation=activation)
+        # x=tf.layers.dropout(x,0.5)
+        x = tf.layers.dense(inputs=x, units=256, activation=activation)
+        # x=tf.layers.dropout(x,0.5)
+        x = tf.layers.dense(
+            inputs=x, units=num_style_dim, activation=activation)
+        x = tf.nn.softmax(x, name='output')
+        print('Encoder out: {}'.format(x))
+        return x
 
 
-def decoder(features):
-    activation = tf.nn.relu
-    # masks /= num_classes
-    # masks -= num_classes / 2
-    x = tf.layers.dense(x, 256, activation=activation)
-    x = tf.layers.dense(
-        inputs=x,
-        units=img_size[0] / 4 * img_size[1] / 4 * 3,
-        activation=activation)
-    x = tf.reshape([img_size[0], img_size[1], 3])
-    x = tf.layers.conv2d_transpose(
-        x,
-        filters=6,
-        kernel_size=[2, 2],
-        strides=(2, 2),
-        padding='valid',
-    )
-    x = tf.layers.conv2d_transpose(
-        x,
-        filters=6,
-        kernel_size=[2, 2],
-        strides=(2, 2),
-        padding='valid',
-    )
-    return x
+def decoder(x):
+    print('Decoder in: {}'.format(x))
+    with tf.variable_scope('Decoder', reuse=tf.AUTO_REUSE):
+        activation = tf.nn.relu
+        x = tf.layers.dense(x, 256, activation=activation)
+        x = tf.layers.dense(
+            inputs=x,
+            units=img_size[0] / 4 * img_size[1] / 4 * 3,
+            activation=activation)
+        x = tf.reshape(x, [-1, int(img_size[0] / 4), int(img_size[1] / 4), 3])
+        x = tf.layers.conv2d_transpose(
+            x,
+            filters=6,
+            kernel_size=[2, 2],
+            strides=(2, 2),
+            padding='valid',
+        )
+        x = tf.layers.conv2d_transpose(
+            x,
+            filters=3,
+            kernel_size=[2, 2],
+            strides=(2, 2),
+            padding='valid',
+        )
+        print('Decoder out: {}'.format(x))
+        return x
 
 
 def discriminator(x):
-    activation = tf.nn.relu
-    x = tf.reshape(x, img_size)
-    x = tf.layers.conv2d(
-        x,
-        filters=16,
-        kernel_size=[3, 3],
-        strides=(1, 1),
-        padding='valid',
-    )
-    x = tf.layers.average_pooling2d(x, pool_size=[2, 2], strides=[2, 2])
-    x = tf.layers.conv2d(
-        x,
-        filters=16,
-        kernel_size=[3, 3],
-        strides=(1, 1),
-        padding='valid',
-    )
-    print(x)
-    x = tf.layers.flatten(x)
-    x = tf.layers.dense(inputs=x, units=512, activation=activation)
-    # x=tf.layers.dropout(x,0.5)
-    x = tf.layers.dense(inputs=x, units=256, activation=activation)
-    # x=tf.layers.dropout(x,0.5)
-    x = tf.layers.dense(inputs=x, units=2, activation=activation)
-    x = tf.nn.softmax(x, name='output')
-    return x, phase_train
+    with tf.variable_scope('Discriminator', reuse=tf.AUTO_REUSE):
+        activation = tf.nn.relu
+        x = tf.reshape(x, [-1, img_size[0], img_size[1], 3])
+        x = tf.layers.conv2d(
+            x,
+            filters=16,
+            kernel_size=[3, 3],
+            strides=(1, 1),
+            padding='valid',
+        )
+        x = tf.layers.average_pooling2d(x, pool_size=[2, 2], strides=[2, 2])
+        x = tf.layers.conv2d(
+            x,
+            filters=16,
+            kernel_size=[3, 3],
+            strides=(1, 1),
+            padding='valid',
+        )
+        x = tf.layers.flatten(x)
+        x = tf.layers.dense(inputs=x, units=256, activation=activation)
+        # x=tf.layers.dropout(x,0.5)
+        x = tf.layers.dense(inputs=x, units=256, activation=activation)
+        # x=tf.layers.dropout(x,0.5)
+        x = tf.layers.dense(inputs=x, units=2, activation=activation)
+        x = tf.nn.softmax(x, name='output')
+        return x
 
 
 def main(unused_argv):
     plt.ion()
     image, mask = input_pipeline(
         ['./pascalvoc2012_96x.tfrecords'], batch_size=BATCH_SIZE)
-    print(image)
     if False:
         with tf.Session() as sess:
             coord = tf.train.Coordinator()
@@ -196,33 +199,76 @@ def main(unused_argv):
 
     # features = []
     reconstructions = []
+    mask = tf.cast(mask, tf.float32)
     for i in classes_labels:
         mask_class = tf.cast(tf.equal(mask, i), tf.float32) * ((mask + 1) /
                                                                (i + 1))
         rec = tf.cond(
-            tf.reducesum(mask_class) > 0,
+            tf.reduce_sum(mask_class) > 0,
             lambda: decoder(encoder(image * mask_class)),
             lambda: tf.zeros([BATCH_SIZE, img_size[0], img_size[1], 3]))
         reconstructions.append(rec)
-    reconstructions=tf.stack(reconstructions)
+    # TODO: Reduce max?
+    reconstructions = tf.reduce_mean(tf.stack(reconstructions), axis=0)
     print(reconstructions)
-    os.ex
-
-    print('Y: {}'.format(y))
-
+    discriminator_out = discriminator(
+        tf.concat([image, reconstructions], axis=0))
+    discrimination_truth = tf.one_hot(
+        tf.concat(
+            [
+                tf.ones(BATCH_SIZE, dtype=tf.int64),
+                tf.zeros(BATCH_SIZE, dtype=tf.int64)
+            ],
+            axis=0),
+        depth=2)
     #Loss
-    loss = tf.losses.sparse_softmax_cross_entropy(labels, y)
-    # loss = tf.losses.absolute_difference(tf.one_hot(labels, depth=2), y)
-    cross_entropy = tf.reduce_mean(loss)
+    rec_loss = tf.losses.mean_squared_error(image, reconstructions)
+    generation_loss = -tf.losses.sigmoid_cross_entropy(discriminator_out,
+                                                       discrimination_truth)
+
+    disc_loss = tf.losses.sigmoid_cross_entropy(discriminator_out,
+                                                discrimination_truth)
+    loss_1 = tf.reduce_mean(rec_loss) + tf.reduce_mean(generation_loss)
+    loss_disc = tf.reduce_mean(disc_loss)
+
+    tensor_names = [
+        t.name for op in tf.get_default_graph().get_operations()
+        for t in op.values()
+    ]
+    # for n in tensor_names:
+    # print(n)
 
     #Optimizer
     rate = tf.placeholder(tf.float32)
-    train_step = tf.train.AdamOptimizer(rate).minimize(cross_entropy)
+    step_1_vars = tf.get_collection(
+        tf.GraphKeys.GLOBAL_VARIABLES, scope='Decoder') + tf.get_collection(
+            tf.GraphKeys.GLOBAL_VARIABLES, scope='Encoder')
+    train_step_1 = tf.train.AdamOptimizer(rate).minimize(
+        loss_1, var_list=step_1_vars)
+    step_disc_vars = tf.get_collection(
+        tf.GraphKeys.GLOBAL_VARIABLES, scope='Discriminator')
+    train_step_disc = tf.train.AdamOptimizer(rate).minimize(
+        loss_disc, var_list=step_disc_vars)
 
-    #Accuracy
-    correct_prediction = tf.equal(tf.argmax(y, 1), labels)
-    correct_prediction = tf.cast(correct_prediction, tf.float32)
-    accuracy = tf.reduce_mean(correct_prediction)
+    def train_1(rt, sess):
+        _, l = sess.run(
+            [train_step_1, loss_1],
+            feed_dict={
+                rate: rt,
+                phase_train: True
+            },
+        )
+        return l
+
+    def train_disc(rt, sess):
+        _, l = sess.run(
+            [train_step_disc, loss_disc],
+            feed_dict={
+                rate: rt,
+                phase_train: True
+            },
+        )
+        return l
 
     #Saver
     save_dir = './models/model'
@@ -233,41 +279,19 @@ def main(unused_argv):
         threads = tf.train.start_queue_runners(coord=coord)
         sess.run(tf.global_variables_initializer())
         t0 = time.clock()
-        rt = 3e-6 * 8
+        rt = 5e-6
+        l1 = 0
+        ld = 0
         for i in range(60001):
             # Train
-            data_feed = train_data_batch[i % (len(train_data_batch) - 1)]
-            label_feed = train_data_label[i % (len(train_data_label) - 1)]
-            _, l = sess.run(
-                [train_step, cross_entropy],
-                feed_dict={
-                    input_data: data_feed,
-                    labels: label_feed,
-                    phase_train: True,
-                    rate: rt
-                })
-            if (i % 60 == 0) and (i != 0):
-                rt = 3e-6 * 4
-                # Print the accuracy
-                acc = 0.
-                test_loss = 0
-                for j in range(len(test_data_batch)):
-                    _, loss_once, acc_once = sess.run(
-                        [train_step, cross_entropy, accuracy],
-                        feed_dict={
-                            input_data:
-                            test_data_batch[j % len(test_data_batch)],
-                            labels: test_data_label[j % len(test_data_label)],
-                            phase_train: False,
-                            rate: rt
-                        })
-                    acc += acc_once
-                    test_loss += loss_once
-                print('%g, %g, %g, %g, %g' %
-                      (i / 60, l, test_loss / len(test_data_batch),
-                       acc / len(test_data_batch), (time.clock() - t0)))
+            if (i % 10 == 0):
+                ld = train_disc(rt, sess)
+            l1 = train_1(rt, sess)
+            if (i % 300 == 0):
+                print('Epoch: {}, Loss1: {}, LossD: {}, Time: {}'.format(
+                    i, l1, ld,
+                    time.clock() - t0))
                 t0 = time.clock()
-                if i / 60 >= 9 and input("Stop?(y/n)") == 'y': break
         builder.add_meta_graph_and_variables(
             sess, tf.saved_model.tag_constants.TRAINING)
         builder.save()
