@@ -180,7 +180,6 @@ def discriminator(x):
 
 
 def main(unused_argv):
-    plt.ion()
     image, mask = input_pipeline(
         ['./pascalvoc2012_96x.tfrecords'], batch_size=BATCH_SIZE)
     if False:
